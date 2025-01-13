@@ -5,136 +5,173 @@ using command-line arguments.
 
 Inputs:
   - file: The path to the CSV file containing the data.
-  - maxrange: Maximum range of the histogram (default: 1,500,000).
-  - minrange: Minimum range of the histogram (default: 0).
-  - binlength: Length of each bin (used if 'bins' is not specified, default: 0).
-  - bins: Number of bins in the histogram (used if 'binlength' is not specified, default: 0).
-  - color: Color of the histogram bins (default: 'b' for blue).
-  - values: If 'true', displays the count of values in each bin (default: 'true').
+
 
 Example Usage:
 
-python3 histo_opt.py file=MeasurementLog2024912.csv maxrange=2000 minrange=0 bins=20 color=b values=true
+python3 histo_opt.py MeasurementLog2024912.csv & 
 
 """
-
-import matplotlib
-matplotlib.use('TkAgg')  # Set to an interactive backend
-from matplotlib.animation import FuncAnimation
+from PyQt5.QtWidgets import QApplication, QMainWindow, QVBoxLayout, QWidget, QHBoxLayout, QPushButton, QLineEdit, QLabel, QSizePolicy
+from PyQt5.QtCore import QTimer
+from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 import matplotlib.pyplot as plt
 import numpy as np
 import sys
+import argparse
 
-def read_data(filePath):
-    data = []  # Initialize an empty list to store the data
+
+def read_data(filePath,data):
+      # Initialize an empty list to store the data
     try:
         with open(filePath, 'r') as fhand:
             i = 0  # Counter to skip the first line (header)
-            for line in fhand:
-                if i == 0:  # Skip the first line
-                    i += 1
+            for i,line in enumerate(fhand):
+                if i == 0 or i<len(data):  # Skip the first line
                     continue
                 info = line.split(',')
-                if (len(info) > 1):
-                  try:
-                      data.append(float(info[1]))  # Append the data from the second column
-                  except ValueError:
-                      continue  # Skip lines that cannot be converted to float
+                if len(info) > 1:
+                    try:
+                        
+                        data.append(float(info[1]))  # Append the data from the second column
+                    except ValueError:
+                        continue  # Skip lines that cannot be converted to float
     except (FileNotFoundError, IOError):
         print(f"Error: The file '{filePath}' could not be found or opened.")
-        display_help()  # Display help text if file is not found
         sys.exit(1)  # Exit the script with an error code
-    return data
 
-def plot_histogram(config):
-    """
-    Plots the histogram based on the provided configuration.
-    Args:
-    - config (dict): Configuration dictionary containing histogram settings.
-    """
-    data = read_data(config['file'])
-    maxrange = config['maxrange']
-    minrange = config['minrange']
-    color = config['color']
-    entries = len(data)
 
-    # Determine number of bins and bin length
-    if config['bins'] == 0 and config['binlength'] > 0:
-        bin_length = config['binlength']
-        nbins = int((maxrange - minrange) / bin_length)
-    elif config['binlength'] == 0 and config['bins'] > 0:
-        nbins = config['bins']
-        bin_length = (maxrange - minrange) / nbins
-    else:
-        raise ValueError("Either the number of bins or the bin length must be specified.")
 
-    # Plot the histogram
-    plt.clf()  # Clear the figure to prepare for new plot
-    values, bins, _ = plt.hist(data, bins=nbins, color=color, range=(minrange, maxrange), 
-                               rwidth=0.7, histtype='bar', label=f'Entries: {entries}\nMax Range: {maxrange}\nMin Range: {minrange}\nBin Length: {bin_length}\nBins: {nbins}')
-    
-    plt.xlabel('Value', fontsize=15)
-    plt.ylabel('Frequency', fontsize=15)
-    plt.legend(loc='best', fontsize=12)
-    plt.xticks(bins, rotation=70)
+class DynamicHistogramApp(QMainWindow):
+    def __init__(self,file_path):
+        super().__init__()
+        
+        self.data = []
+        
+        self.setWindowTitle("Dynamic Histogram")
+        self.setGeometry(100, 100, 800, 600)
 
-    if config['values'] == 'true':
-        for b, v in zip(bins, values):
+        # Enable resizing
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+
+        # Create a central widget and layout
+        self.central_widget = QWidget(self)
+        self.setCentralWidget(self.central_widget)
+        layout = QVBoxLayout(self.central_widget)
+
+        # Create a FigureCanvas (matplotlib widget for PyQt)
+        self.figure, self.ax = plt.subplots(figsize=(8, 6))
+        self.canvas = FigureCanvas(self.figure)
+        layout.addWidget(self.canvas)
+
+        # Create a layout for control buttons
+        controls_layout = QHBoxLayout()
+
+        # File input 
+        self.file_input = file_path
+
+        # Max range input field
+        self.max_range_input = QLineEdit(self)
+        self.max_range_input.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        self.max_range_input.setPlaceholderText("Enter Max Range (e.g., 1500000)")
+        controls_layout.addWidget(self.max_range_input)
+
+        # Min range input field
+        self.min_range_input = QLineEdit(self)
+        self.min_range_input.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        self.min_range_input.setPlaceholderText("Enter Min Range (e.g., 0)")
+        controls_layout.addWidget(self.min_range_input)
+
+        # Number of bins input field
+        self.bins_input = QLineEdit(self)
+        self.bins_input.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        self.bins_input.setPlaceholderText("Enter Number of Bins (e.g., 20)")
+        controls_layout.addWidget(self.bins_input)
+
+        # Color input field
+        self.color_input = QLineEdit(self)
+        self.color_input.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        self.color_input.setPlaceholderText("Enter Color (e.g., b, g, r)")
+        controls_layout.addWidget(self.color_input)
+
+        # Button to update the histogram
+        self.update_button = QPushButton("Update Histogram", self)
+        self.update_button.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        self.update_button.clicked.connect(self.update_histogram)
+        controls_layout.addWidget(self.update_button)
+
+        # Add the controls layout to the main layout
+        layout.addLayout(controls_layout)
+
+        self.status_label = QLabel(self)
+        self.status_label.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        layout.addWidget(self.status_label)
+        
+        # Setup QTimer to update the histogram every 10 seconds (10000 milliseconds)
+        self.update_histogram()
+        self.timer = QTimer(self)
+        self.timer.setInterval(10000)  # 10 seconds
+        self.timer.timeout.connect(self.update_histogram)
+        self.timer.start()  # Start the timer
+
+
+    def update_histogram(self):
+        """
+        Update the histogram plot based on the user inputs.
+        """
+        max_range = float(self.max_range_input.text()) if self.max_range_input.text() else 1500000
+        min_range = float(self.min_range_input.text()) if self.min_range_input.text() else 0
+        bins = int(self.bins_input.text()) if self.bins_input.text() else 20
+        color = self.color_input.text() if self.color_input.text() else 'b'
+        
+        # Read new data
+        read_data(self.file_input, self.data)
+
+        # Plot the histogram
+        self.ax.clear()
+        n, bin_edges, patches = self.ax.hist(self.data, bins=bins, color=color, range=(min_range, max_range), rwidth=0.7, histtype='bar')
+
+        self.ax.set_xlabel('Value', fontsize=15)
+        self.ax.set_ylabel('Frequency', fontsize=15)
+
+        # Add a legend with the label 'Histogram'
+        for patch in patches:
+            patch.set_label('Histogram')  # Explicitly set the label for each bar
+            break
+        self.ax.legend(loc='best', fontsize=12)
+
+        # Set the x-axis ticks and labels
+        self.ax.set_xticks(bin_edges[:-1])  # bin_edges contains the edges of the bins
+        self.ax.set_xticklabels([f'{int(x)}' for x in bin_edges[:-1]], rotation=70)
+
+        # Add value labels if required
+        for b, v in zip(bin_edges[:-1], n):
             if v > 0:
-                plt.text(b + bin_length / 2, v, f'{int(v)}', ha='center', va='bottom', fontsize=7, fontweight='bold')
+                self.ax.text(b + (bin_edges[1] - bin_edges[0]) / 2, v, f'{int(v)}', ha='center', va='bottom', fontsize=7, fontweight='bold')
 
-def draw_histogram(i, config):
-    """
-    Updates the histogram plot for animation.
-    Args:
-    - i (int): Frame index for animation.
-    - config (dict): Configuration dictionary.
-    """
-    plot_histogram(config)
+        self.status_label.setText(f"Updated histogram for {len(self.data)} entries.")
+        self.canvas.draw()
 
-def parse_args():
-    """
-    Parses command-line arguments into a configuration dictionary.
-    
-    Returns:
-    - config (dict): Configuration dictionary.
-    """
-    config = {
-        'binlength': 0,
-        'maxrange': 1500000.0,
-        'minrange': 0,
-        'color': 'b',
-        'values': 'true',
-        'bins': 0
-    }
 
-    # Parse command-line arguments
-    for arg in sys.argv[1:]:
-        try:
-            key, value = arg.split('=')
-            if key.lower() in ['binlength', 'maxrange', 'minrange']:
-                config[key] = float(value)
-            elif key.lower() in ['file', 'color', 'values']:
-                config[key] = value
-            elif key.lower() == 'bins':
-                config[key] = int(value)
-        except ValueError:
-            print(__doc__)
-            sys.exit(f"Invalid argument format: {arg}")
 
-    return config
+
+def parse_arguments():
+    """Parse command-line arguments."""
+    parser = argparse.ArgumentParser(description="Dynamic Histogram Plotter.")
+    parser.add_argument('file', type=str, help="Path to the CSV file to read data from.")
+    return parser.parse_args()
 
 def main():
     """
-    Main function to run the script.
+    Run the PyQt5 application.
     """
-    config = parse_args()
-    fig, ax = plt.subplots()
-    fps = 120
+    args = parse_arguments()
 
-    # Keep a reference to the animation
-    ani = FuncAnimation(fig, draw_histogram, fargs=(config,), frames=fps, repeat=True)
-    plt.show()
+    app = QApplication(sys.argv)
+    window = DynamicHistogramApp(args.file)
+    window.show()
+    sys.exit(app.exec_())
+
 
 if __name__ == "__main__":
     main()
